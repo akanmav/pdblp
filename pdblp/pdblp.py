@@ -15,7 +15,9 @@ _EVENT_DICT = {
               blpapi.Event.PARTIAL_RESPONSE: 'PARTIAL_RESPONSE',
               blpapi.Event.SERVICE_STATUS: 'SERVICE_STATUS',
               blpapi.Event.TIMEOUT: 'TIMEOUT',
-              blpapi.Event.REQUEST: 'REQUEST'
+              blpapi.Event.REQUEST: 'REQUEST',
+              blpapi.Event.TOKEN_STATUS: 'TOKEN_STATUS',
+              blpapi.Event.AUTHORIZATION_STATUS: 'AUTHORIZATION_STATUS'
 }
 
 
@@ -55,7 +57,7 @@ def bopen(**kwargs):
 
 
 class BCon(object):
-    def __init__(self, host='localhost', port=8194, debug=False, timeout=500,
+    def __init__(self, host='localhost', app = None, port=8194, debug=False, timeout=500,
                  session=None, identity=None):
         """
         Create an object which manages connection to the Bloomberg API session
@@ -64,6 +66,8 @@ class BCon(object):
         ----------
         host: str
             Host name
+        app: string
+            name of the listed bloomberg application
         port: int
             Port to connect to
         debug: Boolean {True, False}
@@ -87,6 +91,11 @@ class BCon(object):
             sessionOptions.setServerHost(host)
             sessionOptions.setServerPort(port)
             session = blpapi.Session(sessionOptions)
+
+            if app is not None:
+                authOptions = blpapi.AuthOptions.createWithApp("MCL:QuantOps")
+                authCorrelationId = blpapi.CorrelationId("authCorrelation");
+                sessionOptions.setSessionIdentityOptions(authOptions, authCorrelationId)
         else:
             ev = session.nextEvent(timeout)
             if ev.eventType() != blpapi.Event.TIMEOUT:
@@ -123,22 +132,23 @@ class BCon(object):
         logger = _get_logger(self.debug)
         started = self._session.start()
         if started:
-            ev = self._session.nextEvent()
-            ev_name = _EVENT_DICT[ev.eventType()]
-            logger.info('Event Type: {!r}'.format(ev_name))
-            for msg in ev:
-                logger.info('Message Received:\n{}'.format(msg))
-            if ev.eventType() != blpapi.Event.SESSION_STATUS:
-                raise RuntimeError('Expected a "SESSION_STATUS" event but '
-                                   'received a {!r}'.format(ev_name))
-            ev = self._session.nextEvent()
-            ev_name = _EVENT_DICT[ev.eventType()]
-            logger.info('Event Type: {!r}'.format(ev_name))
-            for msg in ev:
-                logger.info('Message Received:\n{}'.format(msg))
-            if ev.eventType() != blpapi.Event.SESSION_STATUS:
-                raise RuntimeError('Expected a "SESSION_STATUS" event but '
-                                   'received a {!r}'.format(ev_name))
+            expected_status = [blpapi.Event.SESSION_STATUS,
+                               blpapi.Event.SERVICE_STATUS,
+                               blpapi.Event.TOKEN_STATUS,
+                               blpapi.Event.AUTHORIZATION_STATUS,
+                               blpapi.Event.SESSION_STATUS]
+
+            for expected in expected_status:
+                ev = self._session.nextEvent()
+                ev_name = _EVENT_DICT[ev.eventType()]
+                expected_name = _EVENT_DICT[expected]
+
+                logger.info('Event Type: {!r}'.format(ev_name))
+                for msg in ev:
+                    logger.info('Message Received:\n{}'.format(msg))
+
+                if ev.eventType() != expected:
+                    raise RuntimeError(f'Expected a "{expected_name}" event but received a {format(ev_name)}')
         else:
             ev = self._session.nextEvent(self.timeout)
             if ev.eventType() == blpapi.Event.SESSION_STATUS:
